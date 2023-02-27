@@ -1,0 +1,9 @@
+[workspace]
+
+members = [
+    "neutils",
+    "examples/fair-queue-basic",    
+]
+exclude = ["testing/wasm-tests"]
+
+resolver = "2"
