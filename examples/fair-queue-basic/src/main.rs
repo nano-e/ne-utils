@@ -28,7 +28,7 @@ fn generate_packets() -> Vec<Packet> {
 
 fn main() {
     let packets = generate_packets();
-    let mut fq = FairQueue::new(Duration::from_secs(30));
+    let mut fq = FairQueue::new(Duration::from_secs(30), Duration::from_secs(30));
     let mut rng = rand::thread_rng();
     
     for packet in packets {

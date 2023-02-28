@@ -5,7 +5,7 @@ pub mod fair_queue;
 
 #[cfg(test)]
 mod tests {
-    use std::time::{Instant, Duration};
+    use std::{time::{Instant, Duration}, thread::sleep};
 
     use rand::Rng;
 
@@ -37,7 +37,7 @@ mod tests {
     fn test() {
         let num_packets = 1000;
         let packets = generate_packets(num_packets);
-        let mut fq = FairQueue::new(Duration::from_secs(30));
+        let mut fq = FairQueue::new(Duration::from_secs(30), Duration::from_secs(30));
         let mut rng = rand::thread_rng();
         
         for packet in packets {
@@ -54,5 +54,10 @@ mod tests {
         }
         assert!(counter == num_packets);
         assert!(fq.size() == 0);
+
+        sleep(Duration::from_secs(32));
+        fq.dequeue();
+        assert!(fq.get_average_latency().len() == 0);
+        assert!(fq.queue_sizes() == (0usize, 0usize, 0usize));
     }
 }

@@ -16,21 +16,28 @@ pub struct FairQueue {
     stats_interval: Duration,
     latency_counters: HashMap<String, VecDeque<(f64, usize, Instant)>>,
     num_items: usize,
+    idle_duration: Duration, //Duration to trim empty queues
+    idle_run: Option<Instant>, //Last time idle check is run
 }
 
 impl FairQueue {
-    pub fn new(stats_interval: Duration) -> FairQueue {
+    pub fn new(stats_interval: Duration, idle_duration: Duration) -> FairQueue {
         FairQueue {
             queues: HashMap::new(),
             deficit_counters: HashMap::new(),
             stats_interval,
             latency_counters: HashMap::new(),
             num_items: 0,
+            idle_duration: idle_duration,
+            idle_run: None
         }
     }
 
     pub fn size(&self) -> usize {
         self.num_items
+    }
+    pub fn queue_sizes(&self) -> (usize, usize, usize) {
+        (self.queues.len(), self.deficit_counters.len(), self.latency_counters.len())
     }
     // Add a new packet to the queue for the given destination
     pub fn enqueue(&mut self, packet: Packet) {
@@ -82,6 +89,16 @@ impl FairQueue {
                 self.latency_counters.insert(p.destination.clone(), counter);
             }
             self.num_items = self.num_items - 1;
+        }
+        if let Some(idle_run) = self.idle_run {
+            if Instant::now().duration_since(idle_run) > self.idle_duration {
+                self.remove_idle_destinations(self.idle_duration);
+                self.idle_run = Some(Instant::now());
+            }
+        }
+        else {
+            self.remove_idle_destinations(self.idle_duration);
+            self.idle_run = Some(Instant::now());
         }
 
         result
