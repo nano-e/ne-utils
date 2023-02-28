@@ -1,6 +1,6 @@
 [package]
 name = "neutils"
-version = "0.1.0"
+version = "0.1.1"
 description = "Utitlity functions"
 license = "MIT"
 repository = "https://github.com/nano-e/ne-utils"
