@@ -77,7 +77,11 @@ pub struct TunIpv6Addr {
 }
 pub struct TunIpv4Addr {
     pub ip: Ipv4Addr,
+
+    #[cfg(target_os = "macos")]
     pub destination: Ipv4Addr,
+    #[cfg(target_os = "linux")]
+    pub subnet_mask: u8,
 }
 
 pub enum TunIpAddr {
@@ -89,7 +93,7 @@ pub struct TunDevice {
     #[cfg(target_os = "macos")]
     pub(crate) fd: RawFd,
     #[cfg(target_os = "linux")]
-    fd: File,
+    pub(crate) fd: File,
     pub name: String,
 }
 
@@ -140,7 +144,7 @@ fn set_ipv6_address(
 fn set_ipv4_address(
     interface: &str,
     ip: &str,
-    netmask: &str,
+    netmask: u8,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let ifconfig_output = Command::new("sudo")
         .arg("ip")
@@ -152,6 +156,17 @@ fn set_ipv4_address(
         .output()?;
 
     if !ifconfig_output.status.success() {
+        println!("error: {:?}", ifconfig_output.stderr);
+        return Err("Failed to set IP address using the ip command".into());
+    }
+
+    let output = Command::new("ip")
+        .arg("link")
+        .arg("set")
+        .arg(interface)
+        .arg("up")
+        .output()?;
+    if !output.status.success() {
         println!("error: {:?}", ifconfig_output.stderr);
         return Err("Failed to set IP address using the ip command".into());
     }
@@ -213,7 +228,7 @@ impl TunDevice {
     }
 
     #[cfg(target_os = "linux")]
-    pub fn new() -> Result<Self, io::Error> {
+    pub fn new(ip: TunIpAddr) -> Result<Self, io::Error> {
         use std::ffi::CStr;
         use std::fs::OpenOptions;
         use std::io::Error;
@@ -247,7 +262,7 @@ impl TunDevice {
         };
         match ip {
             TunIpAddr::Ipv4(ip) => {
-                set_ipv4_address(&name, &ip.ip.to_string(), &ip.destination.to_string()).unwrap()
+                set_ipv4_address(&name, &ip.ip.to_string(), ip.subnet_mask).unwrap()
             }
             TunIpAddr::IpV6(ip) => {
                 set_ipv6_address(&name, &ip.ip.to_string(), ip.prefix_len).unwrap()
@@ -262,16 +277,20 @@ impl TunDevice {
 
     #[cfg(target_os = "linux")]
     fn read(&self, buf: &mut [u8]) -> Result<usize, io::Error> {
+        use std::io::Read;
+
         (&self.fd).read(buf)
     }
     #[cfg(target_os = "linux")]
     fn write(&self, buf: &[u8]) -> Result<usize, io::Error> {
+        use std::io::Write;
+
         (&self.fd).write(buf)
     }
 
     #[cfg(target_os = "linux")]
     fn close(&self) {
-        (&self.fd).close();
+        //TODO
     }
 
     #[cfg(target_os = "macos")]
