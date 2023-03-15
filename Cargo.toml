@@ -3,6 +3,8 @@
 members = [
     "neutils",
     "examples/fair-queue-basic",    
+    "examples/tun_device_sync",
+    "examples/tun_device_async",
 ]
 exclude = ["testing/wasm-tests"]
 
