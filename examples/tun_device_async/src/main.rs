@@ -27,7 +27,10 @@ async fn main() {
     println!("hello");
     let tun_device = TunDevice::new(neutils::tun_device::TunIpAddr::Ipv4(TunIpv4Addr {
         ip: Ipv4Addr::new(10, 5, 0, 2),
+        #[cfg(target_os = "macos")]
         destination: Ipv4Addr::new(10, 5, 1, 2),
+        #[cfg(target_os = "linux")]
+        subnet_mask: 16
     })).unwrap();
 
     let mut async_tun_device = AsyncTunDevice::new(tun_device).expect("Failed to create AsyncTunDevice");

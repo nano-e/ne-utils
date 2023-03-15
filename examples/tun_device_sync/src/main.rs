@@ -6,7 +6,10 @@ fn main() {
     println!("hello");
     let tun1 = TunDevice::new(neutils::tun_device::TunIpAddr::Ipv4(TunIpv4Addr {
         ip: Ipv4Addr::new(10, 5, 0, 2),
+        #[cfg(target_os = "macos")]
         destination: Ipv4Addr::new(10, 5, 1, 2),
+        #[cfg(target_os = "linux")]
+        subnet_mask: 16
     }));
 
     let (tx, rx) = channel();
