@@ -8,19 +8,29 @@ use tokio::io::{unix::AsyncFd, AsyncRead, AsyncWrite, ReadBuf};
 use crate::tun_device::TunDevice;
 
 pub struct AsyncTunDevice {
+    #[cfg(target_os = "macos")]
     async_fd: AsyncFd<RawFd>,
-    tun_device: TunDevice,
+
+    #[cfg(target_os = "linux")]
+    async_fd: AsyncFd<File>,
 }
 
 impl AsyncTunDevice {
+    #[cfg(target_os = "macos")]
     pub fn new(tun_device: TunDevice) -> Result<Self, std::io::Error> {
         let async_fd = AsyncFd::new(tun_device.fd)?;
         Ok(Self {
             async_fd,
-            tun_device,
         })
     }
 
+    #[cfg(target_os = "linux")]
+    pub fn new(tun_device: TunDevice) -> Result<Self, std::io::Error> {
+        let async_fd = AsyncFd::new(tun_device.fd)?;
+        Ok(Self { async_fd })
+    }
+
+    #[cfg(target_os = "macos")]
     pub async fn recv(&self, buf: &mut [u8]) -> std::io::Result<usize> {
         loop {
             let mut guard = self.async_fd.readable().await?;
@@ -41,7 +51,7 @@ impl AsyncTunDevice {
             }
         }
     }
-
+    #[cfg(target_os = "macos")]
     pub async fn send(&self, buf: &[u8]) -> std::io::Result<usize> {
         loop {
             let mut guard = self.async_fd.writable().await?;
@@ -63,8 +73,39 @@ impl AsyncTunDevice {
         }
     }
 
+    #[cfg(target_os = "linux")]
+    pub async fn recv(&self, buf: &mut [u8]) -> std::io::Result<usize> {
+        loop {
+            let mut guard = self.async_fd.readable().await?;
+
+            match guard.try_io(|inner| {
+                let mut file_ref = inner.get_ref();
+                file_ref.read(buf)
+            }) {
+                Ok(res) => return res,
+                Err(_) => continue,
+            }
+        }
+    }
+
+    #[cfg(target_os = "linux")]
+    pub async fn send(&self, buf: &[u8]) -> std::io::Result<usize> {
+        loop {
+            let mut guard = self.async_fd.writable().await?;
+
+            match guard.try_io(|inner| {
+                let mut file_ref = inner.get_ref();
+                file_ref.write(buf)
+            }) {
+                Ok(res) => return res,
+                Err(_) => continue,
+            }
+        }
+    }
+
 }
 
+#[cfg(target_os = "macos")]
 impl AsyncRead for AsyncTunDevice {
     fn poll_read(
         self: Pin<&mut Self>,
@@ -96,6 +137,7 @@ impl AsyncRead for AsyncTunDevice {
     }
 }
 
+#[cfg(target_os = "macos")]
 impl AsyncWrite for AsyncTunDevice {
     fn poll_write(
         self: Pin<&mut Self>,
@@ -126,5 +168,87 @@ impl AsyncWrite for AsyncTunDevice {
 
     fn poll_shutdown(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<std::io::Result<()>> {
         Poll::Ready(Ok(()))
+    }
+}
+
+#[cfg(target_os = "linux")]
+impl AsyncRead for AsyncTunDevice {
+    fn poll_read(
+        mut self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+        buf: &mut ReadBuf<'_>,
+    ) -> std::task::Poll<std::io::Result<()>> {
+        let fut = self.async_fd.readable();
+        futures::pin_mut!(fut);
+
+        if let std::task::Poll::Ready(res) = futures::poll!(fut, cx) {
+            res.expect("AsyncFd readable error");
+        } else {
+            return std::task::Poll::Pending;
+        }
+
+        let result = self
+            .async_fd
+            .try_io(|inner| inner.get_ref().read(buf.initialize_unfilled()));
+        
+        match result {
+            Ok(Ok(n)) => {
+                buf.advance(n);
+                std::task::Poll::Ready(Ok(()))
+            }
+            Ok(Err(e)) if e.kind() == io::ErrorKind::WouldBlock => {
+                cx.waker().wake_by_ref();
+                std::task::Poll::Pending
+            }
+            Ok(Err(e)) => std::task::Poll::Ready(Err(e)),
+            Err(_) => {
+                cx.waker().wake_by_ref();
+                std::task::Poll::Pending
+            }
+        }
+    }
+}
+
+#[cfg(target_os = "linux")]
+impl AsyncWrite for AsyncTunDevice {
+    fn poll_write(
+        mut self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+        buf: &[u8],
+    ) -> std::task::Poll<std::io::Result<usize>> {
+        let fut = self.async_fd.writable();
+        futures::pin_mut!(fut);
+
+        if let std::task::Poll::Ready(res) = futures::poll!(fut, cx) {
+            res.expect("AsyncFd writable error");
+        } else {
+            return std::task::Poll::Pending;
+        }
+
+        match self.async_fd.try_io(|inner| inner.get_ref().write(buf)) {
+            Ok(Ok(n)) => std::task::Poll::Ready(Ok(n)),
+            Ok(Err(e)) if e.kind() == io::ErrorKind::WouldBlock => {
+                cx.waker().wake_by_ref();
+                std::task::Poll::Pending
+            }
+            Ok(Err(e)) => std::task::Poll::Ready(Err(e)),
+            Err(_) => {
+                cx.waker().wake_by_ref();
+                std::task::Poll::Pending
+            }
+        }
+    }
+
+    fn poll_flush(
+        self: std::pin::Pin<&mut Self>,
+        _cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<std::io::Result<()>> {
+        std::task::Poll::Ready(Ok(()))
+    }
+    fn poll_shutdown(
+        self: std::pin::Pin<&mut Self>,
+        _cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<std::io::Result<()>> {
+        std::task::Poll::Ready(Ok(()))
     }
 }
