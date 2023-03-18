@@ -1,7 +1,5 @@
 use std::fs::File;
-
-use std::io::Read;
-use std::io::Write;
+use std::io::{Read, Write, ErrorKind};
 use std::os::fd::AsRawFd;
 use std::os::unix::io::RawFd;
 use std::pin::Pin;
@@ -81,8 +79,6 @@ impl AsyncTunDevice {
 
     #[cfg(target_os = "linux")]
     pub async fn recv(&self, buf: &mut [u8]) -> std::io::Result<usize> {
-        use std::io::Read;
-
         loop {
             let mut guard = self.async_fd.readable().await?;
 
@@ -98,8 +94,6 @@ impl AsyncTunDevice {
 
     #[cfg(target_os = "linux")]
     pub async fn send(&self, buf: &[u8]) -> std::io::Result<usize> {
-        use std::io::Write;
-
         loop {
             let mut guard = self.async_fd.writable().await?;
 
@@ -112,7 +106,6 @@ impl AsyncTunDevice {
             }
         }
     }
-
 }
 
 #[cfg(target_os = "macos")]
@@ -181,6 +174,7 @@ impl AsyncWrite for AsyncTunDevice {
     }
 }
 
+#[cfg(target_os = "linux")]
 impl AsyncRead for AsyncTunDevice {
     fn poll_read(
         self: std::pin::Pin<&mut Self>,
@@ -193,75 +187,73 @@ impl AsyncRead for AsyncTunDevice {
 
         match fut.poll(cx) {
             std::task::Poll::Ready(res) => {
-                res.expect("AsyncFd readable error");
+                if let Err(e) = res {
+                    return Poll::Ready(Err(e));
+                }
             }
             std::task::Poll::Pending => return std::task::Poll::Pending,
         }
 
         let result = {
-            self.async_fd.get_ref().read(buf.initialize_unfilled())  
+            self.async_fd.get_ref().read(buf.initialize_unfilled())
         };
-        
+
         match result {
-            Ok(n) => {
-                buf.advance(n);
-                std::task::Poll::Ready(Ok(()))
+            Ok(bytes_read) => {
+                buf.advance(bytes_read);
+                Poll::Ready(Ok(()))
             }
-            Err(e) if e.kind() == io::ErrorKind::WouldBlock => {
-                cx.waker().wake_by_ref();
-                std::task::Poll::Pending
+            Err(e) => {
+                if e.kind() == std::io::ErrorKind::WouldBlock {
+                    Poll::Pending
+                } else {
+                    Poll::Ready(Err(e))
+                }
             }
-            Err(e) => std::task::Poll::Ready(Err(e)),
         }
     }
 }
 
+#[cfg(target_os = "linux")]
 impl AsyncWrite for AsyncTunDevice {
-    
+    fn poll_write(
+        self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+        buf: &[u8],
+    ) -> Poll<std::io::Result<usize>> {
+        let fut = self.async_fd.writable();
+        futures::pin_mut!(fut);
 
-fn poll_write(
-    self: std::pin::Pin<&mut Self>,
-    cx: &mut std::task::Context<'_>,
-    buf: &[u8],
-) -> std::task::Poll<std::io::Result<usize>> {
-    let mut_self = self.get_mut();
-    let fut = mut_self.async_fd.writable();
-    futures::pin_mut!(fut);
-
-    match fut.poll(cx) {
-        std::task::Poll::Ready(res) => {
-            res.expect("AsyncFd writable error");
+        match fut.poll(cx) {
+            std::task::Poll::Ready(res) => {
+                if let Err(e) = res {
+                    return Poll::Ready(Err(e));
+                }
+            }
+            std::task::Poll::Pending => return std::task::Poll::Pending,
         }
-        std::task::Poll::Pending => return std::task::Poll::Pending,
-    }
 
-    let raw_fd = mut_self.async_fd.as_raw_fd();
-    let mut file = unsafe { std::fs::File::from_raw_fd(raw_fd) };
-    let result = file.write(buf);
-    let _ = unsafe { file.into_raw_fd() }; // Prevent the file from being closed
+        let result = {
+            self.async_fd.get_ref().write(buf)
+        };
 
-    match result {
-        Ok(n) => std::task::Poll::Ready(Ok(n)),
-        Err(e) if e.kind() == io::ErrorKind::WouldBlock => {
-            cx.waker().wake_by_ref();
-            std::task::Poll::Pending
+        match result {
+            Ok(bytes_written) => Poll::Ready(Ok(bytes_written)),
+            Err(e) => {
+                if e.kind() == std::io::ErrorKind::WouldBlock {
+                    Poll::Pending
+                } else {
+                    Poll::Ready(Err(e))
+                }
+            }
         }
-        Err(e) => std::task::Poll::Ready(Err(e)),
-    }
-}
-
-    
-    fn poll_flush(
-        self: std::pin::Pin<&mut Self>,
-        _cx: &mut std::task::Context<'_>,
-    ) -> std::task::Poll<std::io::Result<()>> {
-        std::task::Poll::Ready(Ok(()))
     }
 
-    fn poll_shutdown(
-        self: std::pin::Pin<&mut Self>,
-        _cx: &mut std::task::Context<'_>,
-    ) -> std::task::Poll<std::io::Result<()>> {
-        std::task::Poll::Ready(Ok(()))
+    fn poll_flush(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<std::io::Result<()>> {
+        Poll::Ready(Ok(()))
+    }
+
+    fn poll_shutdown(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<std::io::Result<()>> {
+        Poll::Ready(Ok(()))
     }
 }

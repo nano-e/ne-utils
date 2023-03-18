@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::collections::VecDeque;
 use std::time::{Duration, Instant};
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct Packet {
     pub destination: String,
     pub data: Vec<u8>,
