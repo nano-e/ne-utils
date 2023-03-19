@@ -63,7 +63,7 @@ pub enum Mode {
     Tap = 2,
 }
 
-pub enum TunMessage {
+pub enum SyncTunMessage {
     Data(Vec<u8>),
     Flush,
     Stop,
@@ -71,10 +71,13 @@ pub enum TunMessage {
     RECEIVE_ERROR(RecvError),
 }
 
+#[derive(Debug)]
 pub struct TunIpv6Addr {
     pub ip: std::net::Ipv6Addr,
     pub prefix_len: u32,
+    // pub destination: std::net::Ipv6Addr,
 }
+#[derive(Debug)]
 pub struct TunIpv4Addr {
     pub ip: Ipv4Addr,
 
@@ -84,9 +87,10 @@ pub struct TunIpv4Addr {
     pub subnet_mask: u8,
 }
 
+#[derive(Debug)]
 pub enum TunIpAddr {
     Ipv4(TunIpv4Addr),
-    IpV6(TunIpv6Addr),
+    Ipv6(TunIpv6Addr),
 }
 // #[derive(Clone)]
 pub struct TunDevice {
@@ -199,7 +203,7 @@ fn set_ipv6_address(
 
 impl TunDevice {
     #[cfg(target_os = "macos")]
-    pub fn new(ip: TunIpAddr) -> Result<Self, io::Error> {
+    pub fn new() -> Result<Self, io::Error> {
         use std::io::{Error, ErrorKind};
 
         if let Some(num) = get_available_utun() {
@@ -208,16 +212,7 @@ impl TunDevice {
                 return Err(io::Error::last_os_error());
             }
             let name = format!("utun{}", num);
-
-            match ip {
-                TunIpAddr::Ipv4(ip) => {
-                    set_ipv4_address(&name, &ip.ip.to_string(), &ip.destination.to_string())
-                        .unwrap()
-                }
-                TunIpAddr::IpV6(ip) => {
-                    set_ipv6_address(&name, &ip.ip.to_string(), ip.prefix_len).unwrap()
-                }
-            };
+            
             Ok(TunDevice {
                 fd: result,
                 name: name,
@@ -226,9 +221,20 @@ impl TunDevice {
             Err(Error::new(ErrorKind::Other, "No available utun"))
         }
     }
+    pub fn set_ip_address (&self, ip: &TunIpAddr){
+        match ip {
+            TunIpAddr::Ipv4(ip) => {
+                set_ipv4_address(&self.name, &ip.ip.to_string(), &ip.destination.to_string())
+                    .unwrap()
+            }
+            TunIpAddr::Ipv6(ip) => {
+                set_ipv6_address(&self.name, &ip.ip.to_string(), ip.prefix_len).unwrap()
+            }
+        };
+    }
 
     #[cfg(target_os = "linux")]
-    pub fn new(ip: TunIpAddr) -> Result<Self, io::Error> {
+    pub fn new() -> Result<Self, io::Error> {
         use std::ffi::CStr;
         use std::fs::OpenOptions;
         use std::io::Error;
@@ -324,7 +330,7 @@ impl TunDevice {
         }
     }
 
-    pub fn start(self, rx: Receiver<TunMessage>) -> Receiver<TunMessage> {
+    pub fn start(self, rx: Receiver<SyncTunMessage>) -> Receiver<SyncTunMessage> {
         let (sender, receiver) = channel();
 
         let b_running = Arc::new(AtomicBool::new(true));
@@ -337,10 +343,10 @@ impl TunDevice {
         std::thread::spawn(move || loop {
             match rx.recv() {
                 Ok(message) => match message {
-                    TunMessage::Data(payload) => {
+                    SyncTunMessage::Data(payload) => {
                         d_writer.write(&payload);
                     }
-                    TunMessage::Stop => {
+                    SyncTunMessage::Stop => {
                         b_running.store(false, Ordering::SeqCst);
                         d_writer.close(); //this will interrupt the read
                         break;
@@ -348,7 +354,7 @@ impl TunDevice {
                     _ => {}
                 },
                 Err(e) => {
-                    error_sender.send(TunMessage::RECEIVE_ERROR(e));
+                    error_sender.send(SyncTunMessage::RECEIVE_ERROR(e));
                 }
             }
         });
@@ -358,10 +364,10 @@ impl TunDevice {
             while b_running_check.load(Ordering::SeqCst) {
                 match d_reader.read(&mut buf) {
                     Ok(size) => {
-                        sender.send(TunMessage::Data(buf[..size - 1].to_vec()));
+                        sender.send(SyncTunMessage::Data(buf[..size - 1].to_vec()));
                     }
                     Err(e) => {
-                        sender.send(TunMessage::IO_ERROR(e));
+                        sender.send(SyncTunMessage::IO_ERROR(e));
                     }
                 }
             }

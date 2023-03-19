@@ -8,7 +8,7 @@ use futures::Future;
 use futures::{ready, stream::Stream};
 use tokio::io::{AsyncReadExt, AsyncWriteExt, self};
 use tokio::io::{unix::AsyncFd, AsyncRead, AsyncWrite, ReadBuf};
-use crate::tun_device::TunDevice;
+use crate::tun_device::{TunDevice, TunIpAddr};
 use std::os::unix::io::{FromRawFd, IntoRawFd};
 
 pub struct AsyncTunDevice {
@@ -17,6 +17,8 @@ pub struct AsyncTunDevice {
 
     #[cfg(target_os = "linux")]
     async_fd: AsyncFd<File>,
+
+    tun_device: TunDevice,
 }
 
 impl AsyncTunDevice {
@@ -25,9 +27,13 @@ impl AsyncTunDevice {
         let async_fd = AsyncFd::new(tun_device.fd)?;
         Ok(Self {
             async_fd,
+            tun_device
         })
     }
 
+    pub fn set_ip_address (&self, ip: &TunIpAddr){
+        self.tun_device.set_ip_address(ip)
+    }
     #[cfg(target_os = "linux")]
     pub fn new(tun_device: TunDevice) -> Result<Self, std::io::Error> {
         let async_fd = AsyncFd::new(tun_device.fd)?;
