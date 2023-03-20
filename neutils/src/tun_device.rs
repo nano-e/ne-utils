@@ -3,6 +3,14 @@ use std::{
     io::{self, Error},
     net::{IpAddr, Ipv4Addr},
     os::unix::prelude::RawFd,
+   
+};
+
+#[cfg(feature = "async")]
+use tokio::process::Command;
+
+#[cfg(not(feature = "async"))]
+use std::{
     process::Command,
     sync::{
         atomic::{AtomicBool, Ordering},
@@ -68,14 +76,13 @@ pub enum SyncTunMessage {
     Flush,
     Stop,
     IO_ERROR(std::io::Error),
-    RECEIVE_ERROR(RecvError),
+    RECEIVE_ERROR,
 }
 
 #[derive(Debug)]
 pub struct TunIpv6Addr {
     pub ip: std::net::Ipv6Addr,
     pub prefix_len: u32,
-    // pub destination: std::net::Ipv6Addr,
 }
 #[derive(Debug)]
 pub struct TunIpv4Addr {
@@ -102,6 +109,7 @@ pub struct TunDevice {
 }
 
 #[cfg(target_os = "macos")]
+#[cfg(not(feature = "async"))]
 fn set_ipv4_address(
     interface: &str,
     ip: &str,
@@ -123,6 +131,30 @@ fn set_ipv4_address(
     Ok(())
 }
 #[cfg(target_os = "macos")]
+#[cfg(feature = "async")]
+async fn set_ipv4_address(
+    interface: &str,
+    ip: &str,
+    destination: &str,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let ifconfig_output = Command::new("ifconfig")
+        .arg(interface)
+        .arg("inet")
+        .arg(ip)
+        .arg(destination)
+        .arg("up")
+        .output().await?;
+
+    if !ifconfig_output.status.success() {
+        println!("error : {:?}", ifconfig_output.stderr);
+        return Err("Failed to set IP address using ifconfig".into());
+    }
+
+    Ok(())
+}
+
+#[cfg(target_os = "macos")]
+#[cfg(not(feature = "async"))]
 fn set_ipv6_address(
     interface: &str,
     ip: &str,
@@ -136,6 +168,28 @@ fn set_ipv6_address(
         .arg(prefix_length.to_string())
         .arg("up")
         .output()?;
+
+    if !ifconfig_output.status.success() {
+        return Err("Failed to set IPv6 address using ifconfig".into());
+    }
+
+    Ok(())
+}
+#[cfg(target_os = "macos")]
+#[cfg(feature = "async")]
+async fn set_ipv6_address(
+    interface: &str,
+    ip: &str,
+    prefix_length: u32,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let ifconfig_output = Command::new("ifconfig")
+        .arg(interface)
+        .arg("inet6")
+        .arg(ip)
+        .arg("prefixlen")
+        .arg(prefix_length.to_string())
+        .arg("up")
+        .output().await?;
 
     if !ifconfig_output.status.success() {
         return Err("Failed to set IPv6 address using ifconfig".into());
@@ -221,17 +275,31 @@ impl TunDevice {
             Err(Error::new(ErrorKind::Other, "No available utun"))
         }
     }
-    pub fn set_ip_address (&self, ip: &TunIpAddr){
+    #[cfg(not(feature = "async"))]
+    pub fn set_ip_address (&self, ip: &TunIpAddr) -> Result<(), Box<dyn std::error::Error>> {
         match ip {
             TunIpAddr::Ipv4(ip) => {
                 set_ipv4_address(&self.name, &ip.ip.to_string(), &ip.destination.to_string())
-                    .unwrap()
+                    
             }
             TunIpAddr::Ipv6(ip) => {
-                set_ipv6_address(&self.name, &ip.ip.to_string(), ip.prefix_len).unwrap()
+                set_ipv6_address(&self.name, &ip.ip.to_string(), ip.prefix_len)
             }
-        };
+        }
     }
+    #[cfg(feature = "async")]
+    pub async fn set_ip_address (&self, ip: &TunIpAddr) -> Result<(), Box<dyn std::error::Error>> {
+        match ip {
+            TunIpAddr::Ipv4(ip) => {
+                set_ipv4_address(&self.name, &ip.ip.to_string(), &ip.destination.to_string()).await
+                    
+            }
+            TunIpAddr::Ipv6(ip) => {
+                set_ipv6_address(&self.name, &ip.ip.to_string(), ip.prefix_len).await
+            }
+        }
+    }
+
 
     #[cfg(target_os = "linux")]
     pub fn new() -> Result<Self, io::Error> {
@@ -329,7 +397,7 @@ impl TunDevice {
             Ok(amount as usize)
         }
     }
-
+    #[cfg(not(feature = "async"))]
     pub fn start(self, rx: Receiver<SyncTunMessage>) -> Receiver<SyncTunMessage> {
         let (sender, receiver) = channel();
 

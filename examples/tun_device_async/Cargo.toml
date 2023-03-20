@@ -6,6 +6,6 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-neutils = { path = "../../neutils"}
+neutils = { path = "../../neutils", features = ["async"]}
 rand = "*"
 tokio = {version = "1.26", features = ["full"]}

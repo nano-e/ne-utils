@@ -31,8 +31,8 @@ impl AsyncTunDevice {
         })
     }
 
-    pub fn set_ip_address (&self, ip: &TunIpAddr){
-        self.tun_device.set_ip_address(ip)
+    pub async fn set_ip_address (&self, ip: &TunIpAddr) -> Result<(), Box<dyn std::error::Error>>{
+        self.tun_device.set_ip_address(ip).await
     }
     #[cfg(target_os = "linux")]
     pub fn new(tun_device: TunDevice) -> Result<Self, std::io::Error> {

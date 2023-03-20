@@ -24,7 +24,7 @@ async fn write_to_device(async_tun_device: Arc<AsyncTunDevice>) {
 
 #[tokio::main]
 async fn main() {
-    start_ipv6().await;
+    start_ipv4().await;
     
 }
 async fn start_ipv4 () {
@@ -58,10 +58,8 @@ async fn start_ipv6() {
 
     tun_device.set_ip_address(&neutils::tun_device::TunIpAddr::Ipv6(TunIpv6Addr {
         ip: Ipv6Addr::new(0xfd00, 0, 0, 0, 0, 0, 0, 1),
-        #[cfg(target_os = "macos")]
-        destination: Ipv6Addr::new(0xfd00, 0, 0, 0, 0, 0, 0, 2),
         prefix_len: 64,
-    }));
+    })).await;
     let mut async_tun_device = AsyncTunDevice::new(tun_device).expect("Failed to create AsyncTunDevice");
 
     let async_tun_device = Arc::new(async_tun_device);

@@ -13,15 +13,15 @@ edition = "2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
-# [features]
-# tun_tokio = ["tokio"]
+[features]
+async = ["tokio"]
 
 [dependencies]
 libc = "0.2"
 cfg-if = "1"
 
 futures = {version = "0.3"}
-tokio = { version = "1.26.0", features = ["full"]}
+tokio = { version = "1.26.0", features = ["full"], optional = true}
 
 [dev-dependencies]
 rand = "~0.8"
