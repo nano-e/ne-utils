@@ -2,6 +2,7 @@ pub mod fair_queue;
 pub mod tun_device;
 pub mod circular_buffer;
 
+mod io;
 #[cfg(feature = "async")]
 pub mod async_tun_device;
 

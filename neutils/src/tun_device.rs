@@ -368,7 +368,7 @@ impl TunDevice {
     }
 
     #[cfg(target_os = "macos")]
-    fn read(&self, buf: &mut [u8]) -> Result<usize, io::Error> {
+   pub fn read(&self, buf: &mut [u8]) -> Result<usize, io::Error> {
         unsafe {
             let amount = libc::read(self.fd, buf.as_mut_ptr() as *mut _, buf.len());
 
@@ -380,13 +380,13 @@ impl TunDevice {
         }
     }
     #[cfg(target_os = "macos")]
-    fn close(&self) {
+    pub fn close(&self) {
         unsafe {
             libc::close(self.fd);
         }
     }
     #[cfg(target_os = "macos")]
-    fn write(&self, buf: &[u8]) -> Result<usize, io::Error> {
+    pub fn write(&self, buf: &[u8]) -> Result<usize, io::Error> {
         unsafe {
             let amount = libc::write(self.fd, buf.as_ptr() as *const _, buf.len());
 
@@ -397,49 +397,49 @@ impl TunDevice {
             Ok(amount as usize)
         }
     }
-    #[cfg(not(feature = "async"))]
-    pub fn start(self, rx: Receiver<SyncTunMessage>) -> Receiver<SyncTunMessage> {
-        let (sender, receiver) = channel();
+    // #[cfg(not(feature = "async"))]
+    // pub fn start(self, rx: Receiver<SyncTunMessage>) -> Receiver<SyncTunMessage> {
+    //     let (sender, receiver) = channel();
 
-        let b_running = Arc::new(AtomicBool::new(true));
-        let b_running_check = b_running.clone();
-        let device = Arc::new(self);
-        let d_writer = device.clone();
-        let d_reader = device.clone();
+    //     let b_running = Arc::new(AtomicBool::new(true));
+    //     let b_running_check = b_running.clone();
+    //     let device = Arc::new(self);
+    //     let d_writer = device.clone();
+    //     let d_reader = device.clone();
 
-        let error_sender = sender.clone();
-        std::thread::spawn(move || loop {
-            match rx.recv() {
-                Ok(message) => match message {
-                    SyncTunMessage::Data(payload) => {
-                        d_writer.write(&payload);
-                    }
-                    SyncTunMessage::Stop => {
-                        b_running.store(false, Ordering::SeqCst);
-                        d_writer.close(); //this will interrupt the read
-                        break;
-                    }
-                    _ => {}
-                },
-                Err(e) => {
-                    error_sender.send(SyncTunMessage::RECEIVE_ERROR(e));
-                }
-            }
-        });
+    //     let error_sender = sender.clone();
+    //     std::thread::spawn(move || loop {
+    //         match rx.recv() {
+    //             Ok(message) => match message {
+    //                 SyncTunMessage::Data(payload) => {
+    //                     d_writer.write(&payload);
+    //                 }
+    //                 SyncTunMessage::Stop => {
+    //                     b_running.store(false, Ordering::SeqCst);
+    //                     d_writer.close(); //this will interrupt the read
+    //                     break;
+    //                 }
+    //                 _ => {}
+    //             },
+    //             Err(e) => {
+    //                 error_sender.send(SyncTunMessage::RECEIVE_ERROR(e));
+    //             }
+    //         }
+    //     });
 
-        std::thread::spawn(move || {
-            let mut buf = vec![0u8; 2048];
-            while b_running_check.load(Ordering::SeqCst) {
-                match d_reader.read(&mut buf) {
-                    Ok(size) => {
-                        sender.send(SyncTunMessage::Data(buf[..size - 1].to_vec()));
-                    }
-                    Err(e) => {
-                        sender.send(SyncTunMessage::IO_ERROR(e));
-                    }
-                }
-            }
-        });
-        receiver
-    }
+    //     std::thread::spawn(move || {
+    //         let mut buf = vec![0u8; 2048];
+    //         while b_running_check.load(Ordering::SeqCst) {
+    //             match d_reader.read(&mut buf) {
+    //                 Ok(size) => {
+    //                     sender.send(SyncTunMessage::Data(buf[..size - 1].to_vec()));
+    //                 }
+    //                 Err(e) => {
+    //                     sender.send(SyncTunMessage::IO_ERROR(e));
+    //                 }
+    //             }
+    //         }
+    //     });
+    //     receiver
+    // }
 }

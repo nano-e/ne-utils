@@ -3,31 +3,49 @@ use std::io::{Read, Write, ErrorKind};
 use std::os::fd::AsRawFd;
 use std::os::unix::io::RawFd;
 use std::pin::Pin;
-use std::task::{Context, Poll};
+use std::task::{Context, Poll, self};
 use futures::Future;
 use futures::{ready, stream::Stream};
 use tokio::io::{AsyncReadExt, AsyncWriteExt, self};
 use tokio::io::{unix::AsyncFd, AsyncRead, AsyncWrite, ReadBuf};
+use tokio::task::yield_now;
+use crate::io::TunIo;
 use crate::tun_device::{TunDevice, TunIpAddr};
 use std::os::unix::io::{FromRawFd, IntoRawFd};
 
+
+macro_rules! ready {
+    ($e:expr $(,)?) => {
+        match $e {
+            std::task::Poll::Ready(t) => t,
+            std::task::Poll::Pending => return std::task::Poll::Pending,
+        }
+    };
+}
+
 pub struct AsyncTunDevice {
     #[cfg(target_os = "macos")]
-    async_fd: AsyncFd<RawFd>,
+    io: AsyncFd<TunIo>,
 
     #[cfg(target_os = "linux")]
     async_fd: AsyncFd<File>,
 
     tun_device: TunDevice,
 }
+impl AsRawFd for AsyncTunDevice {
+    fn as_raw_fd(&self) -> RawFd {
+        self.io.as_raw_fd()
+    }
+}
 
 impl AsyncTunDevice {
     #[cfg(target_os = "macos")]
     pub fn new(tun_device: TunDevice) -> Result<Self, std::io::Error> {
-        let async_fd = AsyncFd::new(tun_device.fd)?;
-        Ok(Self {
-            async_fd,
-            tun_device
+        
+        let async_fd = AsyncFd::new(TunIo::from(RawFd::from(tun_device.fd)))?;
+        Ok(Self {            
+            tun_device,
+            io: async_fd,
         })
     }
 
@@ -40,47 +58,93 @@ impl AsyncTunDevice {
         Ok(Self { async_fd })
     }
 
-    #[cfg(target_os = "macos")]
-    pub async fn recv(&self, buf: &mut [u8]) -> std::io::Result<usize> {
-        loop {
-            let mut guard = self.async_fd.readable().await?;
+    // #[cfg(target_os = "macos")]
+    // pub async fn recv(&self, buf: &mut [u8]) -> std::io::Result<usize> {
+    //     loop {
+    //         let mut guard = self.async_fd.readable().await?;
 
-            match guard.try_io(|inner| {
-                let fd = inner.get_ref().as_raw_fd();
-                let buf_ptr = buf.as_mut_ptr() as *mut libc::c_void;
-                let len = buf.len();
-                let n = unsafe { libc::read(fd, buf_ptr, len) };
-                if n < 0 {
-                    Err(std::io::Error::last_os_error())
-                } else {
-                    Ok(n as usize)
-                }
-            }) {
+    //         match guard.try_io(|inner| {
+    //             let fd = inner.get_ref().as_raw_fd();
+    //             let buf_ptr = buf.as_mut_ptr() as *mut libc::c_void;
+    //             let len = buf.len();
+    //             let n = unsafe { libc::read(fd, buf_ptr, len) };
+    //             if n < 0 {
+    //                 Err(std::io::Error::last_os_error())
+    //             } else {
+    //                 Ok(n as usize)
+    //             }
+    //         }) {
+    //             Ok(res) => return res,
+    //             Err(_) => continue,
+    //         }
+    //     }
+    // }
+    // #[cfg(target_os = "macos")]
+    // pub async fn send(&self, buf: &[u8]) -> std::io::Result<usize> {
+    //     loop {
+    //         let mut guard = self.async_fd.writable().await?;
+
+    //         match guard.try_io(|inner| {
+    //             let fd = inner.get_ref().as_raw_fd();
+    //             let buf_ptr = buf.as_ptr() as *const libc::c_void;
+    //             let len = buf.len();
+    //             let n = unsafe { libc::write(fd, buf_ptr, len) };
+    //             if n < 0 {
+    //                 Err(std::io::Error::last_os_error())
+    //             } else {
+    //                 Ok(n as usize)
+    //             }
+    //         }) {
+    //             Ok(res) => return res,
+    //             Err(_) => continue,
+    //         }
+    //     }
+    // }
+
+    /// Receives a packet from the Tun/Tap interface
+    ///
+    /// This method takes &self, so it is possible to call this method concurrently with other methods on this struct.
+    pub async fn recv(&self, buf: &mut [u8]) -> io::Result<usize> {
+        loop {
+            let mut guard = self.io.readable().await?;
+
+            match guard.try_io(|inner| inner.get_ref().recv(buf)) {
                 Ok(res) => return res,
                 Err(_) => continue,
             }
         }
     }
-    #[cfg(target_os = "macos")]
-    pub async fn send(&self, buf: &[u8]) -> std::io::Result<usize> {
-        loop {
-            let mut guard = self.async_fd.writable().await?;
 
-            match guard.try_io(|inner| {
-                let fd = inner.get_ref().as_raw_fd();
-                let buf_ptr = buf.as_ptr() as *const libc::c_void;
-                let len = buf.len();
-                let n = unsafe { libc::write(fd, buf_ptr, len) };
-                if n < 0 {
-                    Err(std::io::Error::last_os_error())
-                } else {
-                    Ok(n as usize)
-                }
-            }) {
+    /// Sends a packet to the Tun/Tap interface
+    ///
+    /// This method takes &self, so it is possible to call this method concurrently with other methods on this struct.
+    pub async fn send(&self, buf: &[u8]) -> io::Result<usize> {
+        loop {
+            let mut guard = self.io.writable().await?;
+
+            match guard.try_io(|inner| inner.get_ref().send(buf)) {
                 Ok(res) => return res,
                 Err(_) => continue,
             }
         }
+    }
+
+    /// Try to receive a packet from the Tun/Tap interface
+    ///
+    /// When there is no pending data, `Err(io::ErrorKind::WouldBlock)` is returned.
+    ///
+    /// This method takes &self, so it is possible to call this method concurrently with other methods on this struct.
+    pub fn try_recv(&self, buf: &mut [u8]) -> io::Result<usize> {
+        self.io.get_ref().recv(buf)
+    }
+
+    /// Try to send a packet to the Tun/Tap interface
+    ///
+    /// When the socket buffer is full, `Err(io::ErrorKind::WouldBlock)` is returned.
+    ///
+    /// This method takes &self, so it is possible to call this method concurrently with other methods on this struct.
+    pub fn try_send(&self, buf: &[u8]) -> io::Result<usize> {
+        self.io.get_ref().send(buf)
     }
 
     #[cfg(target_os = "linux")]
@@ -120,28 +184,22 @@ impl AsyncRead for AsyncTunDevice {
         self: Pin<&mut Self>,
         cx: &mut Context<'_>,
         buf: &mut ReadBuf<'_>,
-    ) -> Poll<std::io::Result<()>> {
-        let me = self.get_mut();
+    ) -> task::Poll<io::Result<()>> {
+        let self_mut = self.get_mut();
+        loop {
+            let mut guard = ready!(self_mut.io.poll_read_ready_mut(cx))?;
 
-        let mut guard = ready!(me.async_fd.poll_read_ready(cx))?;
-
-        // Safety: The poll_read_ready call above guarantees that a read operation will not block.
-        let result = unsafe {
-            let ptr = buf.unfilled_mut().as_mut_ptr();
-            libc::read(
-                me.async_fd.get_ref().as_raw_fd(),
-                ptr as *mut libc::c_void,
-                buf.remaining(),
-            )
-        };
-
-        match result {
-            n if n >= 0 => {
-                let n = n as usize;
-                buf.advance(n);
-                Poll::Ready(Ok(()))
+            match guard.try_io(|inner| inner.get_mut().read(buf.initialize_unfilled())) {
+                Ok(Ok(n)) => {
+                    buf.set_filled(buf.filled().len() + n);
+                    return Poll::Ready(Ok(()));
+                }
+                Ok(Err(err)) => return Poll::Ready(Err(err)),
+                Err(_) => {
+                    cx.waker().wake_by_ref(); // Signal that the task should be polled again
+                    return Poll::Pending;
+                }
             }
-            _ => Poll::Ready(Err(std::io::Error::last_os_error())),
         }
     }
 }
@@ -152,30 +210,31 @@ impl AsyncWrite for AsyncTunDevice {
         self: Pin<&mut Self>,
         cx: &mut Context<'_>,
         buf: &[u8],
-    ) -> Poll<std::io::Result<usize>> {
-        let me = self.get_mut();
+    ) -> task::Poll<io::Result<usize>> {
+        let self_mut = self.get_mut();
+        loop {
+            let mut guard = ready!(self_mut.io.poll_write_ready_mut(cx))?;
 
-        let mut guard = ready!(me.async_fd.poll_write_ready(cx))?;
-
-        // Safety: The poll_write_ready call above guarantees that a write operation will not block.
-        let result = unsafe {
-            libc::write(
-                me.async_fd.get_ref().as_raw_fd(),
-                buf.as_ptr() as *const libc::c_void,
-                buf.len(),
-            )
-        };
-
-        match result {
-            n if n >= 0 => Poll::Ready(Ok(n as usize)),
-            _ => Poll::Ready(Err(std::io::Error::last_os_error())),
+            match guard.try_io(|inner| inner.get_mut().write(buf)) {
+                Ok(result) => return Poll::Ready(result),
+                Err(_would_block) => continue,
+            }
         }
     }
-    fn poll_flush(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<std::io::Result<()>> {
-        Poll::Ready(Ok(()))
+
+    fn poll_flush(self: Pin<&mut Self>, cx: &mut Context<'_>) -> task::Poll<io::Result<()>> {
+        let self_mut = self.get_mut();
+        loop {
+            let mut guard = ready!(self_mut.io.poll_write_ready_mut(cx))?;
+
+            match guard.try_io(|inner| inner.get_mut().flush()) {
+                Ok(result) => return Poll::Ready(result),
+                Err(_) => continue,
+            }
+        }
     }
 
-    fn poll_shutdown(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<std::io::Result<()>> {
+    fn poll_shutdown(self: Pin<&mut Self>, _: &mut Context<'_>) -> task::Poll<io::Result<()>> {
         Poll::Ready(Ok(()))
     }
 }
