@@ -1,8 +1,8 @@
-use neutils::fair_queue::{Packet, FairQueue};
+use neutils::fair_queue::{Data, FairQueue};
 use rand::{distributions::Alphanumeric, Rng};
 use std::{time::{Instant, Duration}, thread::sleep};
 
-fn generate_packets() -> Vec<Packet> {
+fn generate_packets() -> Vec<Data> {
     let mut rng = rand::thread_rng();
 
     let destinations = vec!["A", "B", "C", "D", "E", "F", "G", "H", "I", "J"];
@@ -13,8 +13,8 @@ fn generate_packets() -> Vec<Packet> {
         let destination = destinations[rng.gen_range(0..destinations.len())].to_string();
         let data: Vec<u8> = (0..100).map(|_| rng.gen()).collect();
         let timestamp = Instant::now();
-        let packet = Packet {
-            destination,
+        let packet = Data {
+            id: destination,
             data,
             timestamp,
             dequeue_time: None,

@@ -1,17 +1,18 @@
 use std::collections::HashMap;
 use std::collections::VecDeque;
+use std::task::Poll;
 use std::time::{Duration, Instant};
 
 #[derive(Clone, Debug)]
-pub struct Packet {
-    pub destination: String,
+pub struct Data {
+    pub id: String,
     pub data: Vec<u8>,
     pub timestamp: Instant,
     pub dequeue_time: Option<Instant>,
 }
 
 pub struct FairQueue {
-    queues: HashMap<String, VecDeque<Packet>>,
+    queues: HashMap<String, VecDeque<Data>>,
     deficit_counters: HashMap<String, (usize, Instant)>,
     stats_interval: Duration,
     latency_counters: HashMap<String, VecDeque<(f64, usize, Instant)>>,
@@ -40,8 +41,8 @@ impl FairQueue {
         (self.queues.len(), self.deficit_counters.len(), self.latency_counters.len())
     }
     // Add a new packet to the queue for the given destination
-    pub fn enqueue(&mut self, packet: Packet) {
-        let destination = packet.destination.clone();
+    pub fn enqueue(&mut self, packet: Data) {
+        let destination = packet.id.clone();
 
         if let Some(queue) = self.queues.get_mut(&destination) {
             queue.push_back(packet);
@@ -55,7 +56,7 @@ impl FairQueue {
         self.num_items = self.num_items + 1;
     }
 
-    pub fn dequeue(&mut self) -> Option<Packet> {
+    pub fn dequeue(&mut self) -> Option<Data> {
         let mut result = None;
 
         if let Some((destination, queue)) = self.get_next_queue() {
@@ -66,7 +67,7 @@ impl FairQueue {
             p.dequeue_time = Some(Instant::now());
             let deficit_counter = self
                 .deficit_counters
-                .entry(p.destination.clone())
+                .entry(p.id.clone())
                 .or_insert((0, Instant::now()));
 
             let elapsed_time = p.timestamp.elapsed().as_secs_f32().max(1.0);
@@ -80,13 +81,13 @@ impl FairQueue {
                 .unwrap()
                 .duration_since(p.timestamp)
                 .as_millis() as f64;
-            if let Some(counter) = self.latency_counters.get_mut(&p.destination) {
+            if let Some(counter) = self.latency_counters.get_mut(&p.id) {
                 counter.push_back((latency, p.data.len(), Instant::now()));
                 counter.retain(|&(_, _, timestamp)| timestamp >= Instant::now() - self.stats_interval);
             } else {
                 let mut counter = VecDeque::new();
                 counter.push_back((latency, p.data.len(), Instant::now()));
-                self.latency_counters.insert(p.destination.clone(), counter);
+                self.latency_counters.insert(p.id.clone(), counter);
             }
             self.num_items = self.num_items - 1;
         }
@@ -104,7 +105,7 @@ impl FairQueue {
         result
     }
 
-    fn get_next_queue(&mut self) -> Option<(&String, &mut VecDeque<Packet>)> {
+    fn get_next_queue(&mut self) -> Option<(&String, &mut VecDeque<Data>)> {
         // println!("---------- get next queue ------->");
         let mut min_deficit = std::usize::MAX;
         let mut next_queue = None;
@@ -173,5 +174,25 @@ impl FairQueue {
         }
 
         result
+    }
+}
+
+
+
+#[cfg(feature = "async")]
+use tokio_stream::Stream;
+
+#[cfg(feature = "async")]
+impl Stream for FairQueue {
+    type Item = Data;
+
+    fn poll_next(self: std::pin::Pin<&mut Self>, cx: &mut std::task::Context<'_>) -> std::task::Poll<Option<Self::Item>> {
+        let this = self.get_mut();
+        if let Some(item) = this.dequeue() {
+            std::task::Poll::Ready(Some(item))
+        } else {
+            cx.waker().wake_by_ref();
+            Poll::Pending
+        }
     }
 }

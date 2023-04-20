@@ -5,6 +5,7 @@ members = [
     "examples/fair-queue-basic",    
     "examples/tun_device_sync",
     "examples/tun_device_async",
+    "examples/async-fair-queue-basic",
 ]
 exclude = ["testing/wasm-tests"]
 

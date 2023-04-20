@@ -3,9 +3,8 @@ pub mod tun_device;
 pub mod circular_buffer;
 
 mod io;
-#[cfg(feature = "async")]
+#[cfg(feature = "async_tun")]
 pub mod async_tun_device;
-
 
 
 #[cfg(test)]
@@ -14,9 +13,9 @@ mod tests {
 
     use rand::Rng;
 
-    use crate::fair_queue::{FairQueue, Packet};
+    use crate::fair_queue::{FairQueue, Data};
 
-    fn generate_packets(num_packets: usize) -> Vec<Packet> {
+    fn generate_packets(num_packets: usize) -> Vec<Data> {
         let mut rng = rand::thread_rng();
     
         let destinations = vec!["A", "B", "C", "D", "E", "F", "G", "H", "I", "J"];
@@ -27,8 +26,8 @@ mod tests {
             let destination = destinations[rng.gen_range(0..destinations.len())].to_string();
             let data: Vec<u8> = (0..100).map(|_| rng.gen()).collect();
             let timestamp = Instant::now();
-            let packet = Packet {
-                destination,
+            let packet = Data {
+                id: destination,
                 data,
                 timestamp,
                 dequeue_time: None,

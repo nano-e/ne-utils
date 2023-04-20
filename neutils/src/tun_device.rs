@@ -6,10 +6,10 @@ use std::{
    
 };
 
-#[cfg(feature = "async")]
+#[cfg(feature = "async_tun")]
 use tokio::process::Command;
 
-#[cfg(not(feature = "async"))]
+#[cfg(not(feature = "async_tun"))]
 use std::{
     process::Command,
     sync::{
@@ -109,7 +109,7 @@ pub struct TunDevice {
 }
 
 #[cfg(target_os = "macos")]
-#[cfg(not(feature = "async"))]
+#[cfg(not(feature = "async_tun"))]
 fn set_ipv4_address(
     interface: &str,
     ip: &str,
@@ -131,7 +131,26 @@ fn set_ipv4_address(
     Ok(())
 }
 #[cfg(target_os = "macos")]
-#[cfg(feature = "async")]
+#[cfg(not(feature = "async_tun"))]
+fn set_mtu(
+    interface: &str,
+    mtu: u16
+) -> Result<(), Box<dyn std::error::Error>> {
+    let ifconfig_output = Command::new("ifconfig")
+        .arg(interface)
+        .arg("mtu")
+        .arg(mtu.to_string())
+        .output()?;
+
+    if !ifconfig_output.status.success() {
+        println!("error : {:?}", ifconfig_output.stderr);
+        return Err("Failed to set mtu ifconfig".into());
+    }
+
+    Ok(())
+}
+#[cfg(target_os = "macos")]
+#[cfg(feature = "async_tun")]
 async fn set_ipv4_address(
     interface: &str,
     ip: &str,
@@ -154,7 +173,7 @@ async fn set_ipv4_address(
 }
 
 #[cfg(target_os = "macos")]
-#[cfg(not(feature = "async"))]
+#[cfg(not(feature = "async_tun"))]
 fn set_ipv6_address(
     interface: &str,
     ip: &str,
@@ -176,7 +195,7 @@ fn set_ipv6_address(
     Ok(())
 }
 #[cfg(target_os = "macos")]
-#[cfg(feature = "async")]
+#[cfg(feature = "async_tun")]
 async fn set_ipv6_address(
     interface: &str,
     ip: &str,
@@ -275,7 +294,7 @@ impl TunDevice {
             Err(Error::new(ErrorKind::Other, "No available utun"))
         }
     }
-    #[cfg(not(feature = "async"))]
+    #[cfg(not(feature = "async_tun"))]
     pub fn set_ip_address (&self, ip: &TunIpAddr) -> Result<(), Box<dyn std::error::Error>> {
         match ip {
             TunIpAddr::Ipv4(ip) => {
@@ -287,7 +306,11 @@ impl TunDevice {
             }
         }
     }
-    #[cfg(feature = "async")]
+    #[cfg(not(feature = "async_tun"))]
+    pub fn set_mtu (&self, mtu: u16) -> Result<(), Box<dyn std::error::Error>> {
+        set_mtu(&self.name, mtu)
+    }
+    #[cfg(feature = "async_tun")]
     pub async fn set_ip_address (&self, ip: &TunIpAddr) -> Result<(), Box<dyn std::error::Error>> {
         match ip {
             TunIpAddr::Ipv4(ip) => {
@@ -397,7 +420,7 @@ impl TunDevice {
             Ok(amount as usize)
         }
     }
-    // #[cfg(not(feature = "async"))]
+    // #[cfg(not(feature = "async_tun"))]
     // pub fn start(self, rx: Receiver<SyncTunMessage>) -> Receiver<SyncTunMessage> {
     //     let (sender, receiver) = channel();
 
