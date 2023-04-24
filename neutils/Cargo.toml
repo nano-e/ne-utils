@@ -15,7 +15,6 @@ edition = "2021"
 
 [features]
 async = ["tokio", "tokio-stream"]
-async_tun = ["tokio"]
 
 [dependencies]
 libc = "0.2"
