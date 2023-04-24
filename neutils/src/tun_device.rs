@@ -66,14 +66,10 @@ pub fn set_ipv6 (name: &str, ipv6: &TunIpv6Addr) {
 #[cfg(target_os = "macos")]
 pub fn set_ipv4 (name: &str, ipv4: &TunIpv4Addr) {
     cmd(
-        "ip",
-        "ip",
-        &[
-            "addr",
-            "add",
-            &format!("{}/{}", ipv4.ip.to_string(), ipv4.subnet_mask),
-            "dev",
-            name,            
+        "ifconfig",
+        "ifconfig",
+        &[name,
+            &format!("{}/{}", ipv4.ip.to_string(), ipv4.destination),
         ],
     );
 }
@@ -81,14 +77,12 @@ pub fn set_ipv4 (name: &str, ipv4: &TunIpv4Addr) {
 #[cfg(target_os = "macos")]
 pub fn set_ipv6 (name: &str, ipv6: &TunIpv6Addr) {
     cmd(
-        "ip",
-        "ip",
+        "ifconfig",
+        "ifconfig",
         &[
-            "addr",
-            "add",
+            name,
+            "inet6",
             &format!("{}/{}", ipv6.ip.to_string(), ipv6.prefix_len),
-            "dev",
-            name,            
         ],
     );
 }
@@ -104,7 +98,7 @@ pub fn inteface_up(name: &str){
 
 #[cfg(target_os = "macos")]
 pub fn inteface_up(name: &str){
-    cmd("ip", "ip", &["link", "set", "up", "dev", name]);
+    cmd("ifconfig", "ifconfig", &[name, "up"]);
 }
 
 pub fn set_ip (name: &str, tun_ip: &TunIpAddr) {
