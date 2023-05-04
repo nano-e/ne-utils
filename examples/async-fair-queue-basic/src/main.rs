@@ -1,5 +1,5 @@
 
-use neutils::fair_queue::{FairQueue, Data};
+use neutils::fair_queue::{FairQueue, Data, HasLen};
 use rand::Rng;
 use std::time::Instant;
 use tokio::{
@@ -8,24 +8,33 @@ use tokio::{
 };
 use tokio_stream::StreamExt;
 
+#[derive(Debug)]
+struct MyData(Vec<u8>);
+
+impl HasLen for MyData {
+    fn len(&self) -> usize {
+        self.0.len()
+    }
+}
+
 #[tokio::main]
 async fn main() {
     let stats_interval = Duration::from_secs(60);
     let idle_duration = Duration::from_secs(10);
 
-    let mut fair_queue = FairQueue::new(stats_interval, idle_duration);
+    let mut fair_queue = FairQueue::<MyData>::new(stats_interval, idle_duration);
 
     // Enqueue some initial data
     let data1 = Data {
         id: "A".to_string(),
-        data: vec![1, 2, 3],
+        data: Box::pin(MyData(vec![1, 2, 3])),
         timestamp: Instant::now(),
         dequeue_time: None,
     };
 
     let data2 = Data {
         id: "B".to_string(),
-        data: vec![4, 5, 6],
+        data: Box::pin(MyData(vec![4, 5, 6])),
         timestamp: Instant::now(),
         dequeue_time: None,
     };
@@ -47,7 +56,7 @@ async fn main() {
 
                 let data = Data {
                     id: random_id.to_string(),
-                    data: random_data,
+                    data: Box::pin(MyData(random_data)),
                     timestamp: Instant::now(),
                     dequeue_time: None,
                 };

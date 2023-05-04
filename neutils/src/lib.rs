@@ -1,39 +1,45 @@
+pub mod circular_buffer;
 pub mod fair_queue;
 pub mod tun_device;
-pub mod circular_buffer;
 
 #[cfg(feature = "async_tun")]
 pub mod async_tun_device;
 
-
 #[cfg(test)]
 mod tests {
-    use std::{time::{Instant, Duration}, thread::sleep};
+    use std::{
+        thread::sleep,
+        time::{Duration, Instant},
+    };
 
     use rand::Rng;
 
-    use crate::fair_queue::{FairQueue, Data};
-
-    fn generate_packets(num_packets: usize) -> Vec<Data> {
+    use crate::fair_queue::{Data, FairQueue, HasLen};
+    impl HasLen for Vec<u8> {
+        fn len(&self) -> usize {
+            self.len()
+        }
+    }
+    fn generate_packets(num_packets: usize) -> Vec<Data<Vec<u8>>> {
         let mut rng = rand::thread_rng();
-    
+
         let destinations = vec!["A", "B", "C", "D", "E", "F", "G", "H", "I", "J"];
-    
+
         let mut packets = Vec::new();
-    
+
         for _ in 0..num_packets {
             let destination = destinations[rng.gen_range(0..destinations.len())].to_string();
             let data: Vec<u8> = (0..100).map(|_| rng.gen()).collect();
             let timestamp = Instant::now();
             let packet = Data {
                 id: destination,
-                data,
+                data: Box::pin(data),
                 timestamp,
                 dequeue_time: None,
             };
             packets.push(packet);
         }
-    
+
         packets
     }
     #[test]
@@ -42,7 +48,7 @@ mod tests {
         let packets = generate_packets(num_packets);
         let mut fq = FairQueue::new(Duration::from_secs(30), Duration::from_secs(30));
         let mut rng = rand::thread_rng();
-        
+
         for packet in packets {
             fq.enqueue(packet);
         }
@@ -52,8 +58,8 @@ mod tests {
             let p = fq.dequeue();
             if p.is_none() {
                 break;
-            }         
-            counter += 1;   
+            }
+            counter += 1;
         }
         assert!(counter == num_packets);
         assert!(fq.size() == 0);

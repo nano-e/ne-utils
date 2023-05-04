@@ -1,18 +1,23 @@
 use std::collections::HashMap;
 use std::collections::VecDeque;
+use std::pin::Pin;
 use std::task::Poll;
 use std::time::{Duration, Instant};
 
+pub trait HasLen {
+    fn len(&self) -> usize;
+}
+
 #[derive(Clone, Debug)]
-pub struct Data {
+pub struct Data<T: HasLen> {
     pub id: String,
-    pub data: Vec<u8>,
+    pub data: Pin<Box<T>>,
     pub timestamp: Instant,
     pub dequeue_time: Option<Instant>,
 }
 
-pub struct FairQueue {
-    queues: HashMap<String, VecDeque<Data>>,
+pub struct FairQueue<T: HasLen> {
+    queues: HashMap<String, VecDeque<Data<T>>>,
     deficit_counters: HashMap<String, (usize, Instant)>,
     stats_interval: Duration,
     latency_counters: HashMap<String, VecDeque<(f64, usize, Instant)>>,
@@ -21,8 +26,8 @@ pub struct FairQueue {
     idle_run: Option<Instant>, //Last time idle check is run
 }
 
-impl FairQueue {
-    pub fn new(stats_interval: Duration, idle_duration: Duration) -> FairQueue {
+impl<T: HasLen> FairQueue<T> {
+    pub fn new(stats_interval: Duration, idle_duration: Duration) -> FairQueue<T> {
         FairQueue {
             queues: HashMap::new(),
             deficit_counters: HashMap::new(),
@@ -41,7 +46,7 @@ impl FairQueue {
         (self.queues.len(), self.deficit_counters.len(), self.latency_counters.len())
     }
     // Add a new packet to the queue for the given destination
-    pub fn enqueue(&mut self, packet: Data) {
+    pub fn enqueue(&mut self, packet: Data<T>) {
         let destination = packet.id.clone();
 
         if let Some(queue) = self.queues.get_mut(&destination) {
@@ -56,7 +61,7 @@ impl FairQueue {
         self.num_items = self.num_items + 1;
     }
 
-    pub fn dequeue(&mut self) -> Option<Data> {
+    pub fn dequeue(&mut self) -> Option<Data<T>> {
         let mut result = None;
 
         if let Some((destination, queue)) = self.get_next_queue() {
@@ -105,8 +110,7 @@ impl FairQueue {
         result
     }
 
-    fn get_next_queue(&mut self) -> Option<(&String, &mut VecDeque<Data>)> {
-        // println!("---------- get next queue ------->");
+    fn get_next_queue(&mut self) -> Option<(&String, &mut VecDeque<Data<T>>)> {
         let mut min_deficit = std::usize::MAX;
         let mut next_queue = None;
         for (destination, queue) in &mut self.queues {
@@ -118,10 +122,6 @@ impl FairQueue {
                 let elapsed_time = deficit_counter.1.elapsed().as_secs_f32().max(1.0);
                 let decay_factor = 1.0 / elapsed_time;
                 deficit_counter.0 = (deficit_counter.0 as f32 * decay_factor) as usize;
-                // println!(
-                //     "queue {}, deficit {}, min deficit {}",
-                //     destination, deficit_counter.0, min_deficit
-                // );
                 if deficit_counter.0 < min_deficit {
                     min_deficit = deficit_counter.0;
                     next_queue = Some((destination, queue));
@@ -132,7 +132,7 @@ impl FairQueue {
         next_queue
     }
 }
-impl FairQueue {
+impl<T: HasLen> FairQueue<T> {
     // Remove destinations where the queue is empty and the last packet received is older than the given duration
     pub fn remove_idle_destinations(&mut self, max_idle_time: Duration) {
         let now = Instant::now();
@@ -177,14 +177,12 @@ impl FairQueue {
     }
 }
 
-
-
 #[cfg(feature = "async")]
 use tokio_stream::Stream;
 
 #[cfg(feature = "async")]
-impl Stream for FairQueue {
-    type Item = Data;
+impl<T: HasLen> Stream for FairQueue<T> {
+    type Item = Data<T>;
 
     fn poll_next(self: std::pin::Pin<&mut Self>, cx: &mut std::task::Context<'_>) -> std::task::Poll<Option<Self::Item>> {
         let this = self.get_mut();

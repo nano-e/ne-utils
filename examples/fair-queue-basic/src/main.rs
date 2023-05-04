@@ -1,8 +1,17 @@
-use neutils::fair_queue::{Data, FairQueue};
+use neutils::fair_queue::{Data, FairQueue, HasLen};
 use rand::{distributions::Alphanumeric, Rng};
 use std::{time::{Instant, Duration}, thread::sleep};
 
-fn generate_packets() -> Vec<Data> {
+
+struct MyData (Vec<u8>);
+
+impl HasLen for MyData {
+    fn len(&self) -> usize {
+        self.0.len()
+    }
+}
+
+fn generate_packets() -> Vec<Data<MyData>> {
     let mut rng = rand::thread_rng();
 
     let destinations = vec!["A", "B", "C", "D", "E", "F", "G", "H", "I", "J"];
@@ -13,9 +22,9 @@ fn generate_packets() -> Vec<Data> {
         let destination = destinations[rng.gen_range(0..destinations.len())].to_string();
         let data: Vec<u8> = (0..100).map(|_| rng.gen()).collect();
         let timestamp = Instant::now();
-        let packet = Data {
+        let packet = Data::<MyData> {
             id: destination,
-            data,
+            data: Box::pin(MyData(data)),
             timestamp,
             dequeue_time: None,
         };
@@ -28,7 +37,7 @@ fn generate_packets() -> Vec<Data> {
 
 fn main() {
     let packets = generate_packets();
-    let mut fq = FairQueue::new(Duration::from_secs(30), Duration::from_secs(30));
+    let mut fq = FairQueue::<MyData>::new(Duration::from_secs(30), Duration::from_secs(30));
     let mut rng = rand::thread_rng();
     
     for packet in packets {
