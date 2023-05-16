@@ -23,6 +23,20 @@ pub enum TunIpAddr {
     Ipv6(TunIpv6Addr),
 }
 
+impl ToString for TunIpAddr {
+    fn to_string(&self) -> String {
+        match self {
+            TunIpAddr::Ipv4(ip) => {
+                ip.ip.to_string()
+            }
+            TunIpAddr::Ipv6(ip) => {
+                ip.ip.to_string()
+            }
+
+        }
+    }
+}
+
 pub fn cmd(program: &str, cmd: &str, args: &[&str]) {
     let ecode = Command::new(program)
         .args(args)
